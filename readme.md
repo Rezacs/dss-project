@@ -186,7 +186,7 @@ public_key.verify(
 
 ## License
 
-MIT License (or your choice)
+University of Pisa
 
 ---
 
