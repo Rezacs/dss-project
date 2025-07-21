@@ -22,7 +22,7 @@ A secure, extensible, and standards-compliant Digital Signature Server for organ
 ### 1. Clone and Install Dependencies
 
 ```bash
-git clone https://github.com/yourusername/digital-signature-server.git
+git clone https://github.com/Rezacs/dss-project
 cd digital-signature-server
 pip3 install -r requirements.txt
 ```
