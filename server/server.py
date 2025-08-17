@@ -19,6 +19,26 @@ def generate_csr(private_key, username, email="user@example.com"):
     ])).sign(private_key, hashes.SHA256(), default_backend())
     return csr.public_bytes(serialization.Encoding.PEM)
 
+
+from flask import send_from_directory
+from flask_swagger_ui import get_swaggerui_blueprint
+
+SWAGGER_URL = '/docs'
+API_URL = '/openapi.yaml'  # served statically
+
+swaggerui_blueprint = get_swaggerui_blueprint(
+    SWAGGER_URL,  # Swagger UI endpoint
+    API_URL,      # OpenAPI file
+    config={'app_name': "DSS API"}
+)
+app.register_blueprint(swaggerui_blueprint, url_prefix=SWAGGER_URL)
+
+@app.route('/openapi.yaml')
+def openapi_yaml():
+    return send_from_directory('.', 'openapi.yaml')  # serve the YAML file
+
+
+
 @app.route('/')
 def hello():
     return "Hello, this is the Digital Signature Server!"

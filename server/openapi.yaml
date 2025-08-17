@@ -1,0 +1,230 @@
+openapi: 3.0.3
+info:
+  title: Digital Signature Server (DSS) API
+  version: "1.0.0"
+servers:
+  - url: https://localhost:5000
+paths:
+  /register:
+    post:
+      tags: [Classic]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string, example: bob }
+                password: { type: string, example: bobpass123 }
+      responses:
+        '201':
+          description: Registered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: User registered and keys generated. }
+        '400': { description: Missing input }
+        '409': { description: User already exists }
+  /get_certificate:
+    get:
+      tags: [CA]
+      summary: Retrieve user's X.509 certificate (PEM)
+      parameters:
+        - in: query
+          name: username
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: PEM certificate
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  certificate:
+                    type: string
+                    example: "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
+        '404': { description: Certificate not found for user }
+        '400': { description: Missing username }
+
+  /get_public_key:
+    get:
+      tags: [Classic]
+      summary: Retrieve PEM public key (classic)
+      parameters:
+        - in: query
+          name: username
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Public key
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  username: { type: string, example: bob }
+                  public_key:
+                    type: string
+                    example: "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
+        '404': { description: User not found }
+        '400': { description: Missing username }
+
+  /login:
+    post:
+      tags: [Classic]
+      summary: Authenticate user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string, example: bob }
+                password: { type: string, example: bobpass123 }
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: Login successful. }
+        '401': { description: Invalid password }
+        '404': { description: User not found }
+        '400': { description: Missing input }
+
+  /sign_doc:
+    post:
+      tags: [Classic]
+      summary: Sign a document (RSA-PSS SHA-256)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password, document]
+              properties:
+                username: { type: string, example: bob }
+                password: { type: string, example: bobpass123 }
+                document: { type: string, example: "Hello, sign me!" }
+      responses:
+        '200':
+          description: Signature generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  signature: { type: string, example: "base64signature==" }
+        '401': { description: Invalid password }
+        '404': { description: User not found }
+        '400': { description: Missing input }
+        '500': { description: Could not decrypt private key }
+
+  /delete_keys:
+    post:
+      tags: [Classic]
+      summary: Delete user's keys and data (irreversible)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string, example: bob }
+                password: { type: string, example: bobpass123 }
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: Key pair and user data deleted. }
+        '401': { description: Invalid password }
+        '404': { description: User not found }
+        '400': { description: Missing input }
+
+  /get_csr:
+    get:
+      tags: [CA]
+      summary: Generate CSR for user
+      parameters:
+        - in: query
+          name: username
+          required: true
+          schema: { type: string }
+        - in: query
+          name: password
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: CSR PEM
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  csr:
+                    type: string
+                    example: "-----BEGIN CERTIFICATE REQUEST-----\n...\n-----END CERTIFICATE REQUEST-----"
+        '401': { description: Invalid password }
+        '404': { description: User not found }
+        '400': { description: Missing input }
+
+  /upload_certificate:
+    post:
+      tags: [CA]
+      summary: Upload user's CA-signed certificate (PEM)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, certificate]
+              properties:
+                username: { type: string, example: bob }
+                certificate:
+                  type: string
+                  example: "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
+      responses:
+        '200':
+          description: Stored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: Certificate uploaded and stored. }
+        '404': { description: User not found }
+        '400': { description: Missing input }
+
+  /:
+    get:
+      tags: [Info]
+      summary: Health/info
+      responses:
+        '200':
+          description: Server is running
+          content:
+            application/json:
+              schema:
+                type: string
+                example: "Hello, this is the Digital Signature Server!"
