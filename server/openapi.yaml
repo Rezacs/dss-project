@@ -2,229 +2,360 @@ openapi: 3.0.3
 info:
   title: Digital Signature Server (DSS) API
   version: "1.0.0"
+  description: |
+    REST API for a Digital Signature Server (DSS). The DSS generates and stores
+    RSA key pairs per user, signs documents on behalf of authenticated users,
+    and lets clients retrieve public keys, CSRs and stored certificates.
+
+    **Security model**: This demo API transmits credentials (username, password)
+    inside request bodies or query parameters over HTTPS. There is no session
+    or token. Ensure all traffic is over TLS in production.
+  contact:
+    name: DSS Project
 servers:
-  - url: https://localhost:5000
+  - url: https://127.0.0.1:5000
+    description: Local development over HTTPS
+
+tags:
+  - name: Info
+    description: Basic info & spec hosting
+  - name: Auth & Users
+    description: User registration, login, and deletion of stored keys
+  - name: Keys & Certificates
+    description: Public key lookup, CSR generation, and certificate storage
+  - name: Signing
+    description: Document signing
+
 paths:
+  /:
+    get:
+      tags: [Info]
+      summary: Health check
+      description: Returns a simple greeting to confirm the server is running.
+      responses:
+        '200':
+          description: Server is running
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "Hello, this is the Digital Signature Server!"
+
+  /openapi.yaml:
+    get:
+      tags: [Info]
+      summary: Serve this OpenAPI spec
+      description: Returns the YAML OpenAPI document used by Swagger UI.
+      responses:
+        '200':
+          description: OpenAPI YAML
+          content:
+            application/yaml:
+              schema:
+                type: string
+
   /register:
     post:
-      tags: [Classic]
-      summary: Register a new user
+      tags: [Auth & Users]
+      summary: Register a new user and generate a key pair
+      description: |
+        Creates a new user with a bcrypt-hashed password, generates an RSA-2048
+        private/public key pair, encrypts the private key with the user's password,
+        and stores both (Base64-encoded) in the internal DB.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [username, password]
-              properties:
-                username: { type: string, example: bob }
-                password: { type: string, example: bobpass123 }
+              $ref: '#/components/schemas/RegisterRequest'
+            examples:
+              ok:
+                value: { "username": "alice", "password": "S3cret!" }
       responses:
         '201':
-          description: Registered
+          description: User created and keys generated
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  message: { type: string, example: User registered and keys generated. }
-        '400': { description: Missing input }
+                $ref: '#/components/schemas/MessageResponse'
+              example: { "message": "User registered and keys generated." }
+        '400': { description: Missing username or password }
         '409': { description: User already exists }
-  /get_certificate:
-    get:
-      tags: [CA]
-      summary: Retrieve user's X.509 certificate (PEM)
-      parameters:
-        - in: query
-          name: username
-          required: true
-          schema: { type: string }
-      responses:
-        '200':
-          description: PEM certificate
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  certificate:
-                    type: string
-                    example: "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
-        '404': { description: Certificate not found for user }
-        '400': { description: Missing username }
-
-  /get_public_key:
-    get:
-      tags: [Classic]
-      summary: Retrieve PEM public key (classic)
-      parameters:
-        - in: query
-          name: username
-          required: true
-          schema: { type: string }
-      responses:
-        '200':
-          description: Public key
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  username: { type: string, example: bob }
-                  public_key:
-                    type: string
-                    example: "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
-        '404': { description: User not found }
-        '400': { description: Missing username }
 
   /login:
     post:
-      tags: [Classic]
-      summary: Authenticate user
+      tags: [Auth & Users]
+      summary: Login (password check only)
+      description: Verifies a username/password against the stored bcrypt hash.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [username, password]
-              properties:
-                username: { type: string, example: bob }
-                password: { type: string, example: bobpass123 }
+              $ref: '#/components/schemas/LoginRequest'
+            examples:
+              ok:
+                value: { "username": "alice", "password": "S3cret!" }
       responses:
         '200':
           description: Login successful
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  message: { type: string, example: Login successful. }
+                $ref: '#/components/schemas/MessageResponse'
+              example: { "message": "Login successful." }
+        '400': { description: Missing username or password }
         '401': { description: Invalid password }
         '404': { description: User not found }
-        '400': { description: Missing input }
-
-  /sign_doc:
-    post:
-      tags: [Classic]
-      summary: Sign a document (RSA-PSS SHA-256)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [username, password, document]
-              properties:
-                username: { type: string, example: bob }
-                password: { type: string, example: bobpass123 }
-                document: { type: string, example: "Hello, sign me!" }
-      responses:
-        '200':
-          description: Signature generated
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  signature: { type: string, example: "base64signature==" }
-        '401': { description: Invalid password }
-        '404': { description: User not found }
-        '400': { description: Missing input }
-        '500': { description: Could not decrypt private key }
 
   /delete_keys:
     post:
-      tags: [Classic]
-      summary: Delete user's keys and data (irreversible)
+      tags: [Auth & Users]
+      summary: Delete a user's keys and data
+      description: Deletes the user's entry from the DB after verifying password.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [username, password]
-              properties:
-                username: { type: string, example: bob }
-                password: { type: string, example: bobpass123 }
+              $ref: '#/components/schemas/DeleteKeysRequest'
+            examples:
+              ok:
+                value: { "username": "alice", "password": "S3cret!" }
       responses:
         '200':
           description: Deleted
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  message: { type: string, example: Key pair and user data deleted. }
+                $ref: '#/components/schemas/MessageResponse'
+              example: { "message": "Key pair and user data deleted." }
+        '400': { description: Missing username or password }
         '401': { description: Invalid password }
         '404': { description: User not found }
-        '400': { description: Missing input }
 
-  /get_csr:
+  /get_public_key:
     get:
-      tags: [CA]
-      summary: Generate CSR for user
+      tags: [Keys & Certificates]
+      summary: Get a user's public key (PEM)
+      description: Returns the PEM-encoded public key for the specified username.
       parameters:
-        - in: query
-          name: username
-          required: true
-          schema: { type: string }
-        - in: query
-          name: password
-          required: true
-          schema: { type: string }
+        - $ref: '#/components/parameters/UsernameQuery'
       responses:
         '200':
-          description: CSR PEM
+          description: Public key returned
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  csr:
-                    type: string
-                    example: "-----BEGIN CERTIFICATE REQUEST-----\n...\n-----END CERTIFICATE REQUEST-----"
+                $ref: '#/components/schemas/PublicKeyResponse'
+              example:
+                username: alice
+                public_key: |
+                  -----BEGIN PUBLIC KEY-----
+                  MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A...
+                  -----END PUBLIC KEY-----
+        '400': { description: Username query parameter is required }
+        '404': { description: User not found }
+
+  /get_csr:
+    get:
+      tags: [Keys & Certificates]
+      summary: Generate and return a CSR (PEM)
+      description: |
+        Decrypts the user's private key with the provided password and returns
+        a freshly generated Certificate Signing Request (CSR) using the username
+        as the subject CN and a default email attribute.
+      parameters:
+        - $ref: '#/components/parameters/UsernameQuery'
+        - $ref: '#/components/parameters/PasswordQuery'
+      responses:
+        '200':
+          description: CSR returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CSRResponse'
+              example:
+                csr: |
+                  -----BEGIN CERTIFICATE REQUEST-----
+                  MIICWjCCAUECAQAwETEPMA0GA1UEAwwGYWxpY2Uw...
+                  -----END CERTIFICATE REQUEST-----
+        '400': { description: Missing username or password }
         '401': { description: Invalid password }
         '404': { description: User not found }
-        '400': { description: Missing input }
 
   /upload_certificate:
     post:
-      tags: [CA]
-      summary: Upload user's CA-signed certificate (PEM)
+      tags: [Keys & Certificates]
+      summary: Upload and store a user certificate (PEM)
+      description: Stores a PEM-encoded certificate associated to the user.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [username, certificate]
-              properties:
-                username: { type: string, example: bob }
-                certificate:
-                  type: string
-                  example: "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
+              $ref: '#/components/schemas/UploadCertificateRequest'
+            examples:
+              ok:
+                value:
+                  username: alice
+                  certificate: |
+                    -----BEGIN CERTIFICATE-----
+                    MIID...AB
+                    -----END CERTIFICATE-----
       responses:
         '200':
           description: Stored
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  message: { type: string, example: Certificate uploaded and stored. }
+                $ref: '#/components/schemas/MessageResponse'
+              example: { "message": "Certificate uploaded and stored." }
+        '400': { description: Missing username or certificate }
         '404': { description: User not found }
-        '400': { description: Missing input }
 
-  /:
+  /get_certificate:
     get:
-      tags: [Info]
-      summary: Health/info
+      tags: [Keys & Certificates]
+      summary: Retrieve stored certificate (PEM)
+      description: Returns the PEM-encoded certificate previously uploaded for the user.
+      parameters:
+        - $ref: '#/components/parameters/UsernameQuery'
       responses:
         '200':
-          description: Server is running
+          description: Certificate returned
           content:
             application/json:
               schema:
-                type: string
-                example: "Hello, this is the Digital Signature Server!"
+                $ref: '#/components/schemas/CertificateResponse'
+              example:
+                certificate: |
+                  -----BEGIN CERTIFICATE-----
+                  MIID...AB
+                  -----END CERTIFICATE-----
+        '400': { description: Username query parameter is required }
+        '404': { description: Certificate not found for user }
+
+  /sign_doc:
+    post:
+      tags: [Signing]
+      summary: Sign a document with the user's private key
+      description: |
+        Decrypts the user's private key using the provided password and signs
+        the input document bytes with RSA-PSS (SHA-256). Returns the Base64
+        signature string.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignDocRequest'
+            examples:
+              ok:
+                value:
+                  username: alice
+                  password: S3cret!
+                  document: "Hello DSS"
+      responses:
+        '200':
+          description: Signature returned (Base64)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignatureResponse'
+              example:
+                signature: "b64=="
+        '400': { description: Missing username, password, or document }
+        '401': { description: Invalid password }
+        '404': { description: User not found }
+        '500': { description: Private key decryption/signing error }
+
+components:
+  parameters:
+    UsernameQuery:
+      name: username
+      in: query
+      description: Username
+      required: true
+      schema: { type: string }
+    PasswordQuery:
+      name: password
+      in: query
+      description: User's password (used to decrypt the private key)
+      required: true
+      schema:
+        type: string
+        format: password
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, example: alice }
+        password: { type: string, format: password, example: S3cret! }
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, example: alice }
+        password: { type: string, format: password, example: S3cret! }
+    DeleteKeysRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, example: alice }
+        password: { type: string, format: password, example: S3cret! }
+    SignDocRequest:
+      type: object
+      required: [username, password, document]
+      properties:
+        username: { type: string, example: alice }
+        password: { type: string, format: password, example: S3cret! }
+        document: { type: string, example: "Hello DSS" }
+    UploadCertificateRequest:
+      type: object
+      required: [username, certificate]
+      properties:
+        username: { type: string, example: alice }
+        certificate:
+          type: string
+          description: PEM-encoded certificate text
+          example: |
+            -----BEGIN CERTIFICATE-----
+            MIID...AB
+            -----END CERTIFICATE-----
+
+    PublicKeyResponse:
+      type: object
+      properties:
+        username: { type: string }
+        public_key:
+          type: string
+          description: PEM-encoded public key
+    CSRResponse:
+      type: object
+      properties:
+        csr:
+          type: string
+          description: PEM-encoded Certificate Signing Request
+    CertificateResponse:
+      type: object
+      properties:
+        certificate:
+          type: string
+          description: PEM-encoded X.509 certificate
+    SignatureResponse:
+      type: object
+      properties:
+        signature:
+          type: string
+          description: Base64-encoded RSA-PSS signature (SHA-256)
+    MessageResponse:
+      type: object
+      properties:
+        message: { type: string }
+    ErrorResponse:
+      type: object
+      properties:
+        error: { type: string }
