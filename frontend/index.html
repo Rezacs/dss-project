@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>DSS – Web UI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0f172a; --panel:#111827; --muted:#94a3b8; --accent:#22c55e; --error:#ef4444; --text:#e2e8f0; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji"; background: var(--bg); color: var(--text); }
+    header { padding: 18px 20px; border-bottom: 1px solid #1f2937; position: sticky; top:0; background: rgba(15,23,42,.85); backdrop-filter: blur(8px); }
+    .brand { font-weight:700; letter-spacing:.3px; }
+    .wrap { max-width: 980px; margin: 28px auto; padding: 0 16px; }
+    .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+    .card { background: var(--panel); border: 1px solid #1f2937; border-radius: 14px; padding: 18px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+    .card h2 { margin: 0 0 10px; font-size: 18px; }
+    label { display:block; margin: 10px 0 6px; color: var(--muted); font-size: 13px; }
+    input[type=text], input[type=password], textarea {
+      width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #283141; background: #0b1220; color: var(--text);
+      outline: none; transition: 140ms border-color ease;
+    }
+    input:focus, textarea:focus { border-color: #334155; }
+    button {
+      margin-top: 14px; padding: 10px 14px; border-radius: 10px; border: 1px solid #1f2a3a; background: linear-gradient(180deg,#16a34a,#15803d); color:white;
+      font-weight: 600; cursor: pointer; transition: 140ms transform ease, 140ms filter ease;
+    }
+    button:active { transform: translateY(1px); filter: brightness(.95); }
+    .muted { color: var(--muted); font-size: 13px; }
+    .ok { color: var(--accent); font-weight: 600; }
+    .err { color: var(--error); font-weight: 600; }
+    pre {
+      background: #0b1220; border: 1px solid #283141; padding: 12px; border-radius: 10px; overflow:auto; white-space: pre-wrap;
+    }
+    .footer { margin-top: 28px; color: var(--muted); font-size: 12px; text-align:center; }
+    .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background:#0b1220; border:1px solid #283141; font-size: 12px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <span class="brand">DSS Web UI</span>
+      <span class="pill" style="margin-left:10px;">HTTPS localhost</span>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="grid">
+
+      <!-- Register -->
+      <section class="card">
+        <h2>Register</h2>
+        <p class="muted">Create a new user. This will generate an RSA keypair and store the encrypted private key.</p>
+        <label for="reg-username">Username</label>
+        <input id="reg-username" type="text" placeholder="carol" />
+        <label for="reg-password">Password</label>
+        <input id="reg-password" type="password" placeholder="••••••••" />
+        <button id="reg-btn">Register</button>
+        <div id="reg-status" class="muted" style="margin-top:10px;"></div>
+        <pre id="reg-output" style="display:none;"></pre>
+      </section>
+
+      <!-- Space for next steps: we'll add Login / Sign / Get Public Key etc. after this works -->
+      <section class="card">
+        <h2>What’s next?</h2>
+        <p class="muted">Once Register works end-to-end, we’ll add tiles for <b>Login</b>, <b>Sign Document</b>, <b>Get Public Key</b>, <b>Get CSR</b>, <b>Upload Certificate</b>, <b>Get Certificate</b>, and <b>Delete Keys</b>.</p>
+        <p class="muted">Your browser will warn about the self-signed server TLS cert on <code>https://localhost:5000</code>. Accept it once to continue using the UI.</p>
+      </section>
+
+    </div>
+
+    <div class="footer">Digital Signature Server — demo UI</div>
+  </main>
+
+  <script>
+    const apiBase = `${location.origin}`; // https://localhost:5000
+
+    async function postJSON(path, body) {
+      const res = await fetch(apiBase + path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const text = await res.text();
+      try { return { status: res.status, json: JSON.parse(text) }; }
+      catch { return { status: res.status, json: { raw: text } }; }
+    }
+
+    // Register
+    const regBtn = document.getElementById('reg-btn');
+    const regStatus = document.getElementById('reg-status');
+    const regOut = document.getElementById('reg-output');
+
+    regBtn.addEventListener('click', async () => {
+      regStatus.textContent = 'Submitting…';
+      regStatus.className = 'muted';
+      regOut.style.display = 'none';
+      const username = document.getElementById('reg-username').value.trim();
+      const password = document.getElementById('reg-password').value;
+
+      if (!username || !password) {
+        regStatus.textContent = 'Please enter a username and password.';
+        regStatus.className = 'err';
+        return;
+      }
+
+      try {
+        const { status, json } = await postJSON('/register', { username, password });
+        regOut.textContent = JSON.stringify(json, null, 2);
+        regOut.style.display = 'block';
+        if (status === 201) {
+          regStatus.textContent = 'Registration successful.';
+          regStatus.className = 'ok';
+        } else {
+          regStatus.textContent = `Error (${status}).`;
+          regStatus.className = 'err';
+        }
+      } catch (e) {
+        regStatus.textContent = 'Network error — check server is running over HTTPS.';
+        regStatus.className = 'err';
+      }
+    });
+  </script>
+</body>
+</html>

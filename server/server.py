@@ -37,6 +37,10 @@ app.register_blueprint(swaggerui_blueprint, url_prefix=SWAGGER_URL)
 def openapi_yaml():
     return send_from_directory('.', 'openapi.yaml')  # serve the YAML file
 
+@app.route('/ui', methods=['GET'])
+def ui():
+    return send_from_directory('frontend', 'index.html')
+
 
 
 @app.route('/')
