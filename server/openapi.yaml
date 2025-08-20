@@ -62,13 +62,13 @@ paths:
         Accepts a list of employees (first + last names). For each valid entry,
         the server:
           - creates a unique username (e.g., jdoe),
-          - generates a strong temporary password (returned only once),
+          - generates a strong temporary password (returned **only once**),
           - hashes the password with bcrypt,
           - generates an RSA-2048 key pair,
           - encrypts the private key with the temporary password (PKCS#8 + BestAvailableEncryption),
-          - stores pw_hash, keys, and password_changed=false in the internal DB.
+          - stores pw_hash, keys, and `PasswordChanged=false` in the internal DB.
 
-        Input can be either a raw array or wrapped in { "employees": [...] }.
+        Input can be either a raw array or wrapped in `{ "employees": [...] }`.
       requestBody:
         required: true
         content:
@@ -107,10 +107,19 @@ paths:
                 skipped_count: 1
                 created:
                   - username: adoe
+                    first_name: Alice
+                    last_name: Doe
+                    PasswordChanged: false
                     temp_password: q9V1P2k3m4Xz
                   - username: brossi
+                    first_name: Bob
+                    last_name: Rossi
+                    PasswordChanged: false
                     temp_password: K7t2J8r1E0hQ
                   - username: zlukasz
+                    first_name: Zoe
+                    last_name: Lukasz
+                    PasswordChanged: false
                     temp_password: A3m6n1Q9w2Zx
                 skipped:
                   - index: 4
@@ -367,6 +376,16 @@ components:
         username:
           type: string
           example: adoe
+        first_name:
+          type: string
+          example: Alice
+        last_name:
+          type: string
+          example: Doe
+        PasswordChanged:
+          type: boolean
+          description: Initialized to false until the user changes their password.
+          example: false
         temp_password:
           type: string
           description: Returned only once; not stored in plaintext.
@@ -404,6 +423,7 @@ components:
           items:
             $ref: '#/components/schemas/SkippedEntry'
 
+    # Legacy / other request/response schemas used by the remaining endpoints
     RegisterRequest:
       type: object
       required: [username, password]

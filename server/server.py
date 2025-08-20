@@ -48,6 +48,7 @@ def hello():
     return "Hello, this is the Digital Signature Server!"
 
 import secrets, string, unicodedata, re
+from datetime import datetime, timezone
 
 @app.route('/register', methods=['POST'])
 def register():
@@ -70,23 +71,12 @@ def register():
         f = norm_ascii(first)
         l = norm_ascii(last)
         if not f and not l:
-            return ''
+            return 'user'
         if not f:
             return l
         if not l:
             return f
         return f[0] + l  # e.g., jdoe
-
-    def unique_username(base: str, existing: set) -> str:
-        if base == '':
-            base = 'user'
-        u = base
-        i = 1
-        while u in existing:
-            i += 1
-            u = f'{base}{i}'
-        existing.add(u)
-        return u
 
     def gen_temp_password(length: int = 12) -> str:
         alphabet = string.ascii_letters + string.digits
@@ -104,9 +94,8 @@ def register():
     skipped = []
 
     with shelve.open(DB_FILE, writeback=True) as db:
-        existing = set(db.keys())  # avoid collisions with current DB
-        # also avoid collisions inside this batch
-        batch_reserved = set()
+        # Track already taken usernames across DB + this batch
+        taken = set(db.keys())
 
         for idx, emp in enumerate(employees, start=1):
             # accept multiple key variants
@@ -118,9 +107,14 @@ def register():
                 continue
 
             base = build_base_username(first, last)
-            # reserve uniqueness across DB + this batch
-            username = unique_username(base, existing | batch_reserved)
-            batch_reserved.add(username)
+
+            # ensure unique username
+            username = base
+            i = 1
+            while username in taken:
+                i += 1
+                username = f'{base}{i}'
+            taken.add(username)
 
             # generate strong temporary password
             temp_password = gen_temp_password(12)
@@ -147,20 +141,24 @@ def register():
                 format=serialization.PublicFormat.SubjectPublicKeyInfo
             )
 
-            # persist (no plaintext password stored)
+            # persist full user record (no plaintext password stored)
             db[username] = {
                 'first_name': first,
                 'last_name': last,
                 'pw_hash': base64.b64encode(pw_hash).decode(),
                 'private_key': base64.b64encode(private_bytes).decode(),
                 'public_key': base64.b64encode(public_bytes).decode(),
-                'password_changed': False
+                'PasswordChanged': False,  # CamelCase flag as requested
+                'created_at': datetime.now(timezone.utc).isoformat()
             }
 
-            # return creds once so the admin can distribute
+            # return per-user output (temp password is ONLY returned here)
             created.append({
                 'username': username,
-                'temp_password': temp_password
+                'first_name': first,
+                'last_name': last,
+                'temp_password': temp_password,
+                'PasswordChanged': False
             })
 
     status = 201 if created else 400
