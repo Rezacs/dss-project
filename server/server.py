@@ -47,49 +47,129 @@ def ui():
 def hello():
     return "Hello, this is the Digital Signature Server!"
 
+import secrets, string, unicodedata, re
+
 @app.route('/register', methods=['POST'])
 def register():
-    data = request.get_json()
-    username = data.get('username')
-    password = data.get('password')
-    if not username or not password:
-        return jsonify({'error': 'Username and password are required.'}), 400
+    data = request.get_json(silent=True)
+    if data is None:
+        return jsonify({'error': 'JSON body required.'}), 400
 
-    with shelve.open(DB_FILE) as db:
-        if username in db:
-            return jsonify({'error': 'User already exists.'}), 409
+    # Accept both raw list and {"employees": [...]}
+    employees = data if isinstance(data, list) else data.get('employees')
+    if not employees or not isinstance(employees, list):
+        return jsonify({'error': 'Provide a list of employees.'}), 400
 
-        # Hash password
-        pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
+    def norm_ascii(s: str) -> str:
+        # strip accents, lowercase, remove non-letters/digits
+        s = unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
+        s = s.lower().strip()
+        return re.sub(r'[^a-z0-9]+', '', s)
 
-        # Generate key pair
-        private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-            backend=default_backend()
-        )
-        public_key = private_key.public_key()
+    def build_base_username(first: str, last: str) -> str:
+        f = norm_ascii(first)
+        l = norm_ascii(last)
+        if not f and not l:
+            return ''
+        if not f:
+            return l
+        if not l:
+            return f
+        return f[0] + l  # e.g., jdoe
 
-        # Encrypt private key with user's password (simplified)
-        private_bytes = private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.BestAvailableEncryption(password.encode())
-        )
+    def unique_username(base: str, existing: set) -> str:
+        if base == '':
+            base = 'user'
+        u = base
+        i = 1
+        while u in existing:
+            i += 1
+            u = f'{base}{i}'
+        existing.add(u)
+        return u
 
-        public_bytes = public_key.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-        )
+    def gen_temp_password(length: int = 12) -> str:
+        alphabet = string.ascii_letters + string.digits
+        # guarantee at least one of each class
+        pw = [
+            secrets.choice(string.ascii_lowercase),
+            secrets.choice(string.ascii_uppercase),
+            secrets.choice(string.digits),
+        ]
+        pw += [secrets.choice(alphabet) for _ in range(max(0, length - len(pw)))]
+        secrets.SystemRandom().shuffle(pw)
+        return ''.join(pw)
 
-        # Store everything
-        db[username] = {
-            'pw_hash': base64.b64encode(pw_hash).decode(),
-            'private_key': base64.b64encode(private_bytes).decode(),
-            'public_key': base64.b64encode(public_bytes).decode(),
-        }
+    created = []
+    skipped = []
 
-    return jsonify({'message': 'User registered and keys generated.'}), 201
+    with shelve.open(DB_FILE, writeback=True) as db:
+        existing = set(db.keys())  # avoid collisions with current DB
+        # also avoid collisions inside this batch
+        batch_reserved = set()
+
+        for idx, emp in enumerate(employees, start=1):
+            # accept multiple key variants
+            first = emp.get('first_name') or emp.get('firstname') or emp.get('name')
+            last  = emp.get('last_name')  or emp.get('lastname')  or emp.get('surname') or emp.get('family_name')
+
+            if not first or not last:
+                skipped.append({'index': idx, 'reason': 'Missing first/last name', 'entry': emp})
+                continue
+
+            base = build_base_username(first, last)
+            # reserve uniqueness across DB + this batch
+            username = unique_username(base, existing | batch_reserved)
+            batch_reserved.add(username)
+
+            # generate strong temporary password
+            temp_password = gen_temp_password(12)
+
+            # hash password
+            pw_hash = bcrypt.hashpw(temp_password.encode(), bcrypt.gensalt())
+
+            # key pair
+            private_key = rsa.generate_private_key(
+                public_exponent=65537,
+                key_size=2048,
+                backend=default_backend()
+            )
+            public_key = private_key.public_key()
+
+            # encrypt private key with the temp password
+            private_bytes = private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.BestAvailableEncryption(temp_password.encode())
+            )
+            public_bytes = public_key.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+
+            # persist (no plaintext password stored)
+            db[username] = {
+                'first_name': first,
+                'last_name': last,
+                'pw_hash': base64.b64encode(pw_hash).decode(),
+                'private_key': base64.b64encode(private_bytes).decode(),
+                'public_key': base64.b64encode(public_bytes).decode(),
+                'password_changed': False
+            }
+
+            # return creds once so the admin can distribute
+            created.append({
+                'username': username,
+                'temp_password': temp_password
+            })
+
+    status = 201 if created else 400
+    return jsonify({
+        'created_count': len(created),
+        'skipped_count': len(skipped),
+        'created': created,
+        'skipped': skipped
+    }), status
 
 
 @app.route('/get_public_key', methods=['GET'])

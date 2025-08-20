@@ -57,30 +57,67 @@ paths:
   /register:
     post:
       tags: [Auth & Users]
-      summary: Register a new user and generate a key pair
+      summary: Batch register employees and generate key pairs
       description: |
-        Creates a new user with a bcrypt-hashed password, generates an RSA-2048
-        private/public key pair, encrypts the private key with the user's password,
-        and stores both (Base64-encoded) in the internal DB.
+        Accepts a list of employees (first + last names). For each valid entry,
+        the server:
+          - creates a unique username (e.g., jdoe),
+          - generates a strong temporary password (returned only once),
+          - hashes the password with bcrypt,
+          - generates an RSA-2048 key pair,
+          - encrypts the private key with the temporary password (PKCS#8 + BestAvailableEncryption),
+          - stores pw_hash, keys, and password_changed=false in the internal DB.
+
+        Input can be either a raw array or wrapped in { "employees": [...] }.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RegisterRequest'
+              oneOf:
+                - $ref: '#/components/schemas/BatchRegisterRequest'
+                - type: array
+                  items:
+                    $ref: '#/components/schemas/EmployeeInput'
             examples:
-              ok:
-                value: { "username": "alice", "password": "S3cret!" }
+              wrapped:
+                summary: Wrapped list of employees
+                value:
+                  employees:
+                    - first_name: Alice
+                      last_name: Doe
+                    - name: Bob
+                      surname: Rossi
+              raw_list:
+                summary: Raw list of employees
+                value:
+                  - firstname: Zoë
+                    lastname: Łukasz
+                  - name: Maria
+                    family_name: García
       responses:
         '201':
-          description: User created and keys generated
+          description: Accounts created; temporary passwords are returned only once in this response.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
-              example: { "message": "User registered and keys generated." }
-        '400': { description: Missing username or password }
-        '409': { description: User already exists }
+                $ref: '#/components/schemas/BatchRegisterResponse'
+              example:
+                created_count: 3
+                skipped_count: 1
+                created:
+                  - username: adoe
+                    temp_password: q9V1P2k3m4Xz
+                  - username: brossi
+                    temp_password: K7t2J8r1E0hQ
+                  - username: zlukasz
+                    temp_password: A3m6n1Q9w2Zx
+                skipped:
+                  - index: 4
+                    reason: Missing first/last name
+                    entry: { nickname: "N/A" }
+        '400':
+          description: Invalid payload or no valid employees provided.
 
   /login:
     post:
@@ -254,7 +291,7 @@ paths:
               ok:
                 value:
                   username: alice
-                  password: S3cret!
+                  password: "S3cret!"
                   document: "Hello DSS"
       responses:
         '200':
@@ -288,31 +325,114 @@ components:
         format: password
 
   schemas:
+    EmployeeInput:
+      type: object
+      description: One employee record. Any one of the first/last name key variants is accepted.
+      properties:
+        first_name:
+          type: string
+          description: Given name
+        firstname:
+          type: string
+          description: Given name (alias)
+        name:
+          type: string
+          description: Given name (alias)
+        last_name:
+          type: string
+          description: Family name
+        lastname:
+          type: string
+          description: Family name (alias)
+        surname:
+          type: string
+          description: Family name (alias)
+        family_name:
+          type: string
+          description: Family name (alias)
+      additionalProperties: true
+
+    BatchRegisterRequest:
+      type: object
+      required: [employees]
+      properties:
+        employees:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmployeeInput'
+
+    CreatedAccount:
+      type: object
+      properties:
+        username:
+          type: string
+          example: adoe
+        temp_password:
+          type: string
+          description: Returned only once; not stored in plaintext.
+          example: q9V1P2k3m4Xz
+
+    SkippedEntry:
+      type: object
+      properties:
+        index:
+          type: integer
+          description: 1-based position of the entry in the input list.
+        reason:
+          type: string
+          example: Missing first/last name
+        entry:
+          type: object
+          description: Original input that was skipped.
+      additionalProperties: true
+
+    BatchRegisterResponse:
+      type: object
+      properties:
+        created_count:
+          type: integer
+          example: 3
+        skipped_count:
+          type: integer
+          example: 1
+        created:
+          type: array
+          items:
+            $ref: '#/components/schemas/CreatedAccount'
+        skipped:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkippedEntry'
+
     RegisterRequest:
       type: object
       required: [username, password]
       properties:
         username: { type: string, example: alice }
-        password: { type: string, format: password, example: S3cret! }
+        password: { type: string, format: password, example: "S3cret!" }
+
     LoginRequest:
       type: object
       required: [username, password]
       properties:
         username: { type: string, example: alice }
-        password: { type: string, format: password, example: S3cret! }
+        password: { type: string, format: password, example: "S3cret!" }
+
     DeleteKeysRequest:
       type: object
       required: [username, password]
       properties:
         username: { type: string, example: alice }
-        password: { type: string, format: password, example: S3cret! }
+        password: { type: string, format: password, example: "S3cret!" }
+
     SignDocRequest:
       type: object
       required: [username, password, document]
       properties:
         username: { type: string, example: alice }
-        password: { type: string, format: password, example: S3cret! }
+        password: { type: string, format: password, example: "S3cret!" }
         document: { type: string, example: "Hello DSS" }
+
     UploadCertificateRequest:
       type: object
       required: [username, certificate]
@@ -333,28 +453,33 @@ components:
         public_key:
           type: string
           description: PEM-encoded public key
+
     CSRResponse:
       type: object
       properties:
         csr:
           type: string
           description: PEM-encoded Certificate Signing Request
+
     CertificateResponse:
       type: object
       properties:
         certificate:
           type: string
           description: PEM-encoded X.509 certificate
+
     SignatureResponse:
       type: object
       properties:
         signature:
           type: string
           description: Base64-encoded RSA-PSS signature (SHA-256)
+
     MessageResponse:
       type: object
       properties:
         message: { type: string }
+
     ErrorResponse:
       type: object
       properties:
