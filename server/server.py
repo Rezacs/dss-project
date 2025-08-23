@@ -169,6 +169,95 @@ def register():
         'skipped': skipped
     }), status
 
+@app.route('/change_password', methods=['POST'])
+def change_password():
+    """
+    JSON body:
+    {
+      "username": "alice",
+      "current_password": "OldPass!",
+      "new_password": "NewPass123"
+    }
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "JSON body required."}), 400
+
+    username = data.get("username")
+    current_password = data.get("current_password")
+    new_password = data.get("new_password")
+
+    if not username or not current_password or not new_password:
+        return jsonify({"error": "username, current_password, and new_password are required."}), 400
+
+    # (Optional) minimal password policy
+    if len(new_password) < 8:
+        return jsonify({"error": "New password must be at least 8 characters."}), 400
+    if new_password == current_password:
+        return jsonify({"error": "New password must be different from current password."}), 400
+
+    with shelve.open(DB_FILE, writeback=True) as db:
+        if username not in db:
+            return jsonify({"error": "User not found."}), 404
+
+        user = db[username]
+
+        # Verify current password against stored bcrypt hash
+        try:
+            stored_hash = base64.b64decode(user.get("pw_hash", "").encode())
+        except Exception:
+            return jsonify({"error": "Corrupted password hash for user."}), 500
+
+        if not bcrypt.checkpw(current_password.encode(), stored_hash):
+            return jsonify({"error": "Invalid current password."}), 401
+
+        # Decrypt existing private key with the *current* password
+        try:
+            enc_priv_pem = base64.b64decode(user["private_key"].encode())
+            private_key = serialization.load_pem_private_key(
+                enc_priv_pem,
+                password=current_password.encode(),
+                backend=default_backend()
+            )
+        except Exception:
+            # If this fails, the stored key or password is wrong/corrupt
+            return jsonify({"error": "Failed to decrypt private key with current password."}), 500
+
+        # Re-encrypt private key using the *new* password
+        try:
+            new_private_pem = private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.BestAvailableEncryption(new_password.encode())
+            )
+        except Exception:
+            return jsonify({"error": "Failed to re-encrypt private key with new password."}), 500
+
+        # Hash the new password
+        new_pw_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt())
+
+        # Persist updates
+        user["pw_hash"] = base64.b64encode(new_pw_hash).decode()
+        user["private_key"] = base64.b64encode(new_private_pem).decode()
+        user["PasswordChanged"] = True  # flip the flag you created earlier
+
+        # (Optional) track time of change
+        try:
+            from datetime import datetime, timezone
+            user["password_changed_at"] = datetime.now(timezone.utc).isoformat()
+        except Exception:
+            pass
+
+        # If writeback=False was used, we'd need: db[username] = user
+        # But we opened with writeback=True above, so in-place mutation persists.
+
+    return jsonify({
+        "message": "Password changed successfully.",
+        "username": username,
+        "PasswordChanged": True
+    }), 200
+
+
 
 @app.route('/get_public_key', methods=['GET'])
 def get_public_key():
